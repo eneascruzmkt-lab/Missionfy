@@ -47,19 +47,19 @@ ICO_FILE = os.path.join(BUNDLE_DIR, "money_mission.ico")
 # ── Themes ───────────────────────────────────────────────────────────────────
 THEMES = {
     "dark": {
-        "BG": "#0a0a0f", "BG2": "#111118", "BG_CARD": "#161620",
-        "BG_HOVER": "#1e1e2a", "BG_INPUT": "#0e0e14", "BORDER": "#2a2a38",
-        "FG": "#f0f8f4", "FG2": "#d0e8dc", "DIMMED": "#7a8a95",
-        "ACCENT": "#00d47e", "ACCENT2": "#00b8d4", "YELLOW": "#f0c040",
-        "RED": "#ff6b6b", "RED_DIM": "#2a1418", "BLUE_DIM": "#0a1830",
-        "GREEN_DIM": "#0a2018", "CHART_FILL": "#0a2018", "BAR_BG": "#1a1a28",
-        "GRID": "#1a1a28",
+        "BG": "#12121a", "BG2": "#181825", "BG_CARD": "#1c1c2e",
+        "BG_HOVER": "#252538", "BG_INPUT": "#16162a", "BORDER": "#2e2e42",
+        "FG": "#f0f0f5", "FG2": "#c8c8d8", "DIMMED": "#6b6b80",
+        "ACCENT": "#34d399", "ACCENT2": "#38bdf8", "YELLOW": "#fbbf24",
+        "RED": "#f87171", "RED_DIM": "#2a1420", "BLUE_DIM": "#0a1830",
+        "GREEN_DIM": "#0a2818", "CHART_FILL": "#0a2818", "BAR_BG": "#1a1a2e",
+        "GRID": "#1a1a2e",
     },
     "light": {
         "BG": "#f0f8f4", "BG2": "#e5f0ea", "BG_CARD": "#ffffff",
         "BG_HOVER": "#d8ece0", "BG_INPUT": "#e8f4ec", "BORDER": "#b8d4c4",
         "FG": "#0a2e1f", "FG2": "#1a4535", "DIMMED": "#508070",
-        "ACCENT": "#00a868", "ACCENT2": "#0090b0", "YELLOW": "#b08800",
+        "ACCENT": "#34d399", "ACCENT2": "#38bdf8", "YELLOW": "#b08800",
         "RED": "#d32f2f", "RED_DIM": "#fce8e8", "BLUE_DIM": "#e0f4f8",
         "GREEN_DIM": "#d0f0e0", "CHART_FILL": "#d0f0e0", "BAR_BG": "#c8dcd0",
         "GRID": "#c8dcd0",
@@ -308,7 +308,7 @@ def style_titlebar(win):
             hwnd = ctypes.windll.user32.FindWindowW(None, win.title())
         if not hwnd:
             return
-        is_dark = 1 if T["BG"] == "#0a0a0f" else 0
+        is_dark = 1 if T["BG"] == "#12121a" else 0
         ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(ctypes.c_int(is_dark)), 4)
         bg_hex = T["BG"].lstrip("#")
         r, g, b = int(bg_hex[0:2], 16), int(bg_hex[2:4], 16), int(bg_hex[4:6], 16)
