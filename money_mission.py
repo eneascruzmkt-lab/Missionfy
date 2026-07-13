@@ -801,7 +801,6 @@ class Missionfy:
 
     # ── Draw dashboard ────────────────────────────────────────────────────────
     def _draw_dashboard(self, win):
-        self._current_tab = getattr(self, "_current_tab", "inicio")
         PAD = 24
 
         main = tk.Frame(win, bg=t("BG"))
@@ -839,32 +838,23 @@ class Missionfy:
         hdr_btns.pack(side="right")
         self._btn(hdr_btns, "Exportar", self._export_csv, t("GREEN_DIM"), t("ACCENT"), 10).pack(side="left", padx=3)
 
-        # ── Tab bar ──────────────────────────────────────────────────────────
-        tab_bar = tk.Frame(main, bg=t("BG"))
-        tab_bar.pack(fill="x", padx=PAD, pady=(10, 0))
-
-        tabs = [
-            ("inicio", "Início"),
-            ("receitas", "Registrar"),
-            ("metas", "Missões"),
-            ("config", "Config"),
-        ]
-
-        for tab_id, tab_label in tabs:
-            is_active = self._current_tab == tab_id
-            bg_c = t("ACCENT") if is_active else t("BG_HOVER")
-            fg_c = t("BG") if is_active else t("DIMMED")
-            tab_btn = tk.Label(tab_bar, text=tab_label, font=(FONT, 11, "bold" if is_active else ""),
-                               bg=bg_c, fg=fg_c, padx=14, pady=6, cursor="hand2")
-            tab_btn.pack(side="left", padx=(0, 4))
-            tab_btn.bind("<Button-1>", lambda e, tid=tab_id: self._switch_tab(tid))
-            if not is_active:
-                tab_btn.bind("<Enter>", lambda e, b=tab_btn: b.configure(bg=self._lighten(t("BG_HOVER"))))
-                tab_btn.bind("<Leave>", lambda e, b=tab_btn: b.configure(bg=t("BG_HOVER")))
-
         tk.Frame(main, bg=t("BORDER"), height=1).pack(fill="x", padx=PAD, pady=(8, 0))
 
-        # ── Tab content area (scrollable) ────────────────────────────────────
+        # ── Fixed footer (outside scroll, packed first to reserve space) ─────
+        footer = tk.Frame(main, bg=t("BG2"))
+        footer.pack(fill="x", side="bottom")
+        tk.Frame(footer, bg=t("BORDER"), height=1).pack(fill="x")
+        footer_inner = tk.Frame(footer, bg=t("BG2"))
+        footer_inner.pack(fill="x", padx=PAD, pady=10)
+
+        self._btn(footer_inner, "Registrar", lambda: self._on_add_revenue(None, None),
+                  t("ACCENT"), t("BG"), 11).pack(side="left", padx=(0, 8))
+        self._btn(footer_inner, "Importar CSV", self._show_csv_import,
+                  t("BG_HOVER"), t("FG"), 11).pack(side="left", padx=(0, 8))
+        self._btn(footer_inner, "Config", self._show_config_window,
+                  t("BG_HOVER"), t("FG"), 11).pack(side="left", padx=(0, 8))
+
+        # ── Scrollable content area ──────────────────────────────────────────
         content_outer = tk.Frame(main, bg=t("BG"))
         content_outer.pack(fill="both", expand=True)
 
@@ -895,47 +885,165 @@ class Missionfy:
         canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
         win.after(100, lambda: (canvas.yview_moveto(0), _update_scroll()))
 
-        # ── Draw current tab ─────────────────────────────────────────────────
-        tab = self._current_tab
-
-        if tab == "inicio":
-            # Botões rápidos
-            actions = tk.Frame(frame, bg=t("BG"))
-            actions.pack(fill="x", padx=PAD, pady=(8, 0))
-            self._btn(actions, "+ Receita", lambda: self._switch_tab("receitas", tipo="receita"), t("ACCENT"), t("BG"), 12).pack(side="left", padx=(0, 6))
-            self._btn(actions, "- Despesa", lambda: self._switch_tab("receitas", tipo="despesa"), t("RED"), t("BG"), 12).pack(side="left", padx=(0, 6))
-
-            # Gamificação
-            self._draw_gamification(frame)
-
-            self._draw_daily_target(frame)
-            self._draw_balance_and_summary(frame)
-            for goal in self._goals():
-                self._draw_goal_card(frame, goal)
-            self._draw_charts_row(frame)
-
-        elif tab == "receitas":
-            self._draw_tab_receitas(frame)
-
-        elif tab == "metas":
-            for goal in self._goals():
-                self._draw_goal_card(frame, goal)
-            btn_row = tk.Frame(frame, bg=t("BG"))
-            btn_row.pack(pady=(10, 0))
-            self._btn(btn_row, "Gerenciar Missões", self._manage_goals, t("BLUE_DIM"), t("ACCENT2"), 11).pack(side="left", padx=4)
-            self._btn(btn_row, "+ Nova Missão", self._add_goal, t("GREEN_DIM"), t("ACCENT"), 11).pack(side="left", padx=4)
-            self._btn(btn_row, "Categorias", self._manage_categories, t("BG_HOVER"), t("YELLOW"), 11).pack(side="left", padx=4)
-
-        elif tab == "config":
-            self._draw_history(frame)
-            self._draw_settings(frame)
+        # ── Sections ─────────────────────────────────────────────────────────
+        self._draw_seu_dia(frame)
+        self._draw_sua_semana(frame)
+        self._draw_sua_jornada(frame)
+        self._draw_suas_metas(frame)
 
         tk.Frame(frame, bg=t("BG"), height=10).pack()
 
-    def _switch_tab(self, tab_id, tipo=None):
-        self._current_tab = tab_id
-        self._preselect_tipo = tipo
-        self._refresh_dashboard()
+    # ── Seção: Seu Dia ────────────────────────────────────────────────────────
+    def _draw_seu_dia(self, parent):
+        PAD = 24
+        goal = self._main_goal()
+        goals = self._goals()
+        total = self._main_total()
+        remaining = max(goal["amount"] - total, 0)
+        dl = days_left(goal)
+        daily_needed = remaining / dl if dl > 0 else 0
+        ents = entries_for_goal(self.data, goal["name"])
+        today_rev = sum(e["amount"] for e in ents if e["amount"] > 0
+                        and e["timestamp"][:10] == date.today().isoformat())
+        day_progress = min(today_rev / daily_needed, 1.0) if daily_needed > 0 else 0
+
+        sec = tk.Frame(parent, bg=t("BG"))
+        sec.pack(fill="x", padx=PAD, pady=(16, 4))
+        tk.Label(sec, text="SEU DIA", font=(FONT, 10, "bold"),
+                 bg=t("BG"), fg=t("DIMMED")).pack(anchor="w")
+
+        # Status message
+        if not goals:
+            msg = "Nenhuma meta ativa"
+            msg_color = t("DIMMED")
+        elif today_rev >= daily_needed and daily_needed > 0:
+            msg = "Meta do dia batida!"
+            msg_color = t("ACCENT")
+        elif daily_needed > 0:
+            falta = max(daily_needed - today_rev, 0)
+            msg = f"Faltam R${falta:,.2f} pra meta de hoje"
+            msg_color = t("YELLOW")
+        else:
+            msg = "Nenhuma meta ativa"
+            msg_color = t("DIMMED")
+
+        tk.Label(sec, text=msg, font=(FONT, 16, "bold"),
+                 bg=t("BG"), fg=msg_color).pack(anchor="w", pady=(4, 8))
+
+        # Progress bar (height=14)
+        bar_outer = tk.Frame(sec, bg=t("BAR_BG"), height=14)
+        bar_outer.pack(fill="x", pady=(0, 6))
+        bar_outer.pack_propagate(False)
+        if day_progress > 0:
+            bar_fill = tk.Frame(bar_outer, bg=t("ACCENT"), height=14)
+            bar_fill.place(relx=0, rely=0, relwidth=0, relheight=1.0)
+            bar_outer.after(50, lambda bf=bar_fill, p=day_progress: bf.place(relwidth=min(p, 1.0)))
+
+        # Small text
+        tk.Label(sec, text=f"R${today_rev:,.2f} de R${daily_needed:,.2f} hoje",
+                 font=(FONT, 9), bg=t("BG"), fg=t("DIMMED")).pack(anchor="w")
+
+    # ── Seção: Sua Semana ─────────────────────────────────────────────────────
+    def _draw_sua_semana(self, parent):
+        PAD = 24
+        goal = self._main_goal()
+        total = self._main_total()
+        remaining = max(goal["amount"] - total, 0)
+        dl = days_left(goal)
+        daily_needed = remaining / dl if dl > 0 else 0
+        ents = entries_for_goal(self.data, goal["name"])
+        revenue_ents = [e for e in ents if e["amount"] > 0]
+        gm = calc_gamification(self.data, goal)
+        hoje = date.today()
+
+        sec = tk.Frame(parent, bg=t("BG"))
+        sec.pack(fill="x", padx=PAD, pady=(16, 4))
+
+        title_row = tk.Frame(sec, bg=t("BG"))
+        title_row.pack(fill="x")
+        tk.Label(title_row, text="SUA SEMANA", font=(FONT, 10, "bold"),
+                 bg=t("BG"), fg=t("DIMMED")).pack(side="left")
+        if gm["streak"] > 0:
+            tk.Label(title_row, text=f"\U0001f525 {gm['streak']} dias seguidos",
+                     font=(FONT, 10), bg=t("BG"), fg=t("YELLOW")).pack(side="right")
+
+        # Week grid (Mon-Sun)
+        week_start = hoje - timedelta(days=hoje.weekday())
+        day_labels = ["S", "T", "Q", "Q", "S", "S", "D"]
+
+        grid_frame = tk.Frame(sec, bg=t("BG"))
+        grid_frame.pack(fill="x", pady=(8, 0))
+
+        for i in range(7):
+            day_date = week_start + timedelta(days=i)
+            day_str = day_date.isoformat()
+            day_total = sum(e["amount"] for e in revenue_ents if e["timestamp"][:10] == day_str)
+
+            is_today = day_date == hoje
+            is_future = day_date > hoje
+            met_target = day_total >= daily_needed and daily_needed > 0
+
+            if met_target:
+                sq_bg = t("ACCENT")
+                sq_fg = t("BG")
+            elif is_future:
+                sq_bg = t("BG_HOVER")
+                sq_fg = t("DIMMED")
+            elif day_date < hoje and not met_target:
+                sq_bg = t("RED_DIM")
+                sq_fg = t("RED")
+            else:
+                sq_bg = t("BG_HOVER")
+                sq_fg = t("DIMMED")
+
+            hl_thick = 2 if is_today else 0
+            hl_color = t("ACCENT") if is_today else t("BG")
+
+            col_frame = tk.Frame(grid_frame, bg=t("BG"))
+            col_frame.pack(side="left", padx=(0, 6))
+
+            tk.Label(col_frame, text=day_labels[i], font=(FONT, 9),
+                     bg=t("BG"), fg=t("DIMMED")).pack()
+
+            sq = tk.Frame(col_frame, bg=sq_bg, width=36, height=36,
+                          highlightbackground=hl_color, highlightthickness=hl_thick)
+            sq.pack()
+            sq.pack_propagate(False)
+
+            if day_total > 0:
+                amt_text = f"{int(day_total)}" if day_total >= 1 else f"{day_total:.0f}"
+                tk.Label(sq, text=f"R${amt_text}", font=(FONT, 7),
+                         bg=sq_bg, fg=sq_fg).pack(expand=True)
+
+    # ── Seção: Sua Jornada (placeholder) ──────────────────────────────────────
+    def _draw_sua_jornada(self, parent):
+        PAD = 24
+        sec = tk.Frame(parent, bg=t("BG"))
+        sec.pack(fill="x", padx=PAD, pady=(16, 4))
+        tk.Label(sec, text="SUA JORNADA", font=(FONT, 10, "bold"),
+                 bg=t("BG"), fg=t("DIMMED")).pack(anchor="w")
+        tk.Label(sec, text="Em breve", font=(FONT, 11),
+                 bg=t("BG"), fg=t("DIMMED")).pack(anchor="w", pady=(4, 0))
+
+    # ── Seção: Suas Metas ─────────────────────────────────────────────────────
+    def _draw_suas_metas(self, parent):
+        PAD = 24
+        sec = tk.Frame(parent, bg=t("BG"))
+        sec.pack(fill="x", padx=PAD, pady=(16, 4))
+        tk.Label(sec, text="SUAS METAS", font=(FONT, 10, "bold"),
+                 bg=t("BG"), fg=t("DIMMED")).pack(anchor="w")
+        for goal in self._goals():
+            self._draw_goal_card(parent, goal)
+
+    # ── Placeholder methods ───────────────────────────────────────────────────
+    def _show_csv_import(self):
+        pass  # Will be implemented in Task 7
+
+    def _show_config_window(self):
+        threading.Thread(target=self._config_dialog, daemon=True).start()
+
+    def _config_dialog(self):
+        pass  # Will be implemented in Task 9
 
     # ── Tab: Receitas (inline form) ───────────────────────────────────────────
     def _draw_tab_receitas(self, parent):
