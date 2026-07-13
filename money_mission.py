@@ -24,6 +24,12 @@ try:
 except ImportError:
     HAS_KEYBOARD = False
 
+try:
+    from plyer import notification as plyer_notification
+    HAS_PLYER = True
+except ImportError:
+    HAS_PLYER = False
+
 # ── SUAS METAS INICIAIS ──────────────────────────────────────────────────────
 DEFAULT_GOALS = [
     {"name": "Missão Principal", "amount": 25000,
