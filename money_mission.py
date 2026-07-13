@@ -3343,6 +3343,11 @@ def show_welcome_wizard():
                 end = hoje + timedelta(days=dias)
                 selected_end.set(end.isoformat())
                 end_display.configure(text=f"{end.strftime('%d/%m/%Y')}  ({dias} dias)")
+                try:
+                    end_entry.delete(0, tk.END)
+                    end_entry.insert(0, end.strftime("%d/%m/%Y"))
+                except Exception:
+                    pass
                 for w in shortcuts.winfo_children():
                     w.configure(bg=BORDER_W, fg=DIM_W)
 
@@ -3430,14 +3435,29 @@ def show_welcome_wizard():
                      font=(FONT, 9), bg=CARD_W, fg=DIM_W).pack(pady=(6, 0))
 
             def finish(e=None):
-                ed = selected_end.get()
-                try:
-                    d = date.fromisoformat(ed)
-                    if d <= hoje:
-                        error.configure(text="A data deve ser no futuro!")
+                # Ler direto do campo de texto se o usuario digitou algo
+                raw = end_entry.get().strip()
+                if raw:
+                    try:
+                        d = datetime.strptime(raw, "%d/%m/%Y").date()
+                        ed = d.isoformat()
+                    except ValueError:
+                        try:
+                            d = date.fromisoformat(raw)
+                            ed = d.isoformat()
+                        except ValueError:
+                            error.configure(text="Formato invalido. Use dd/mm/aaaa")
+                            return
+                else:
+                    ed = selected_end.get()
+                    try:
+                        d = date.fromisoformat(ed)
+                    except ValueError:
+                        error.configure(text="Data invalida.")
                         return
-                except ValueError:
-                    error.configure(text="Data inválida.")
+
+                if d <= hoje:
+                    error.configure(text="A data deve ser no futuro!")
                     return
 
                 save_data({
