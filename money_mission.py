@@ -458,72 +458,195 @@ class Missionfy:
         screen_w = popup.winfo_screenwidth()
         screen_h = popup.winfo_screenheight()
         cx = click_x if click_x is not None else popup.winfo_pointerx()
-        # Will be repositioned after size is known
-        x = cx
-        y = screen_h - 60  # placeholder, adjusted below
 
         # Outer border glow
         inner = tk.Frame(popup, bg=t("BG"))
         inner.pack(fill="both", expand=True, padx=1, pady=1)
 
-        # ── Header with icon ─────────────────────────────────────────────
+        # ── Gather data ──────────────────────────────────────────────────
+        goal = self._main_goal()
+        progress = self._main_progress()
+        gamification = calc_gamification(self.data, goal)
+        streak = gamification.get("streak", 0)
+
+        gt = self._main_total()
+        goal_amt = goal["amount"]
+        remaining = max(goal_amt - gt, 0)
+        dl = max(days_left(goal), 1)
+        daily_needed = remaining / dl if dl > 0 else 0
+
+        today = date.today()
+        revenue_entries = [e for e in self.data.get("entries", []) if e["amount"] > 0]
+        today_rev = sum(e["amount"] for e in revenue_entries if e["timestamp"][:10] == today.isoformat())
+
+        # ── 1. Header (BG_CARD) ──────────────────────────────────────────
         hdr = tk.Frame(inner, bg=t("BG_CARD"), padx=16, pady=12)
         hdr.pack(fill="x")
 
-        progress = self._main_progress()
-        color = t("ACCENT") if progress >= 0.75 else (t("YELLOW") if progress >= 0.4 else t("RED"))
+        # Brand row: icon + "Missionfy" + streak
+        brand_row = tk.Frame(hdr, bg=t("BG_CARD"))
+        brand_row.pack(fill="x")
 
-        # Logo + nome alinhados no centro vertical
-        brand = tk.Frame(hdr, bg=t("BG_CARD"))
-        brand.pack(side="left")
+        brand_left = tk.Frame(brand_row, bg=t("BG_CARD"))
+        brand_left.pack(side="left")
         try:
             if os.path.exists(ICON_FILE):
                 from PIL import ImageTk
                 ico = Image.open(ICON_FILE).resize((22, 22), Image.LANCZOS)
                 photo = ImageTk.PhotoImage(ico)
-                icon_lbl = tk.Label(brand, image=photo, bg=t("BG_CARD"), anchor="center")
+                icon_lbl = tk.Label(brand_left, image=photo, bg=t("BG_CARD"), anchor="center")
                 icon_lbl.image = photo
                 icon_lbl.pack(side="left", padx=(0, 6), pady=0)
         except Exception:
             pass
-        tk.Label(brand, text="Missionfy", font=(FONT, 12, "bold"),
+        tk.Label(brand_left, text="Missionfy", font=(FONT, 12, "bold"),
                  bg=t("BG_CARD"), fg=t("FG"), anchor="center").pack(side="left", pady=0)
 
-        tk.Label(hdr, text=f"{int(progress * 100)}%", font=(FONT, 16, "bold"),
-                 bg=t("BG_CARD"), fg=color).pack(side="right")
+        if streak > 0:
+            tk.Label(brand_row, text=f"\U0001f525{streak}", font=(FONT, 12, "bold"),
+                     bg=t("BG_CARD"), fg=t("YELLOW")).pack(side="right")
 
-        # ── Goals with progress ──────────────────────────────────────────
-        for g in self._goals():
-            gt = total_sum(entries_for_goal(self.data, g["name"]))
-            gp = pct(gt, g)
-            gc = t("ACCENT") if gp >= 0.75 else (t("YELLOW") if gp >= 0.4 else t("RED"))
+        # Smart message
+        if today_rev >= daily_needed and daily_needed > 0:
+            smart_text = "Meta do dia batida!"
+            smart_color = t("ACCENT")
+        elif daily_needed > 0:
+            faltam = daily_needed - today_rev
+            smart_text = f"Faltam R${faltam:,.2f} hoje"
+            smart_color = t("YELLOW")
+        else:
+            smart_text = f"{int(progress * 100)}% da meta"
+            smart_color = t("ACCENT")
 
-            gf = tk.Frame(inner, bg=t("BG"), padx=16, pady=6)
-            gf.pack(fill="x")
+        tk.Label(hdr, text=smart_text, font=(FONT, 13, "bold"),
+                 bg=t("BG_CARD"), fg=smart_color, anchor="w").pack(fill="x", pady=(6, 4))
 
-            top_row = tk.Frame(gf, bg=t("BG"))
-            top_row.pack(fill="x")
-            tk.Label(top_row, text=g["name"], font=(FONT, 12), bg=t("BG"), fg=t("FG")).pack(side="left")
-            tk.Label(top_row, text=f"{int(gp * 100)}%", font=(FONT, 12, "bold"),
-                     bg=t("BG"), fg=gc).pack(side="right")
+        # Progress bar of main goal
+        bar_f = tk.Frame(hdr, bg=t("BAR_BG"), height=6)
+        bar_f.pack(fill="x", pady=(0, 2))
+        bar_f.pack_propagate(False)
+        bar_color = t("ACCENT") if progress >= 0.75 else (t("YELLOW") if progress >= 0.4 else t("RED"))
+        if progress > 0:
+            tk.Frame(bar_f, bg=bar_color, height=6).place(relx=0, rely=0, relwidth=min(progress, 1.0), relheight=1.0)
 
-            bot_row = tk.Frame(gf, bg=t("BG"))
-            bot_row.pack(fill="x", pady=(2, 0))
-            tk.Label(bot_row, text=f"R${gt:,.2f}", font=(FONT, 12, "bold"),
-                     bg=t("BG"), fg=t("FG2")).pack(side="left")
-            tk.Label(bot_row, text=f"de R${g['amount']:,}", font=(FONT, 12),
-                     bg=t("BG"), fg=t("DIMMED")).pack(side="left", padx=(4, 0))
-
-            bar_f = tk.Frame(gf, bg=t("BAR_BG"), height=6)
-            bar_f.pack(fill="x", pady=(4, 0))
-            bar_f.pack_propagate(False)
-            if gp > 0:
-                tk.Frame(bar_f, bg=gc, height=6).place(relx=0, rely=0, relwidth=min(gp, 1.0), relheight=1.0)
-
-        # ── Separator ────────────────────────────────────────────────────
+        # ── 2. Quick register section ────────────────────────────────────
         tk.Frame(inner, bg=t("BORDER"), height=1).pack(fill="x", padx=12, pady=6)
 
-        # ── Action buttons with icons ────────────────────────────────────
+        reg_frame = tk.Frame(inner, bg=t("BG"), padx=16)
+        reg_frame.pack(fill="x")
+
+        # Tipo toggle
+        tipo_var = tk.StringVar(value="receita")
+        toggle_frame = tk.Frame(reg_frame, bg=t("BG"))
+        toggle_frame.pack(fill="x", pady=(0, 6))
+
+        def rebuild_toggle():
+            for w in toggle_frame.winfo_children():
+                w.destroy()
+            current = tipo_var.get()
+            # + Receita
+            r_bg = t("ACCENT") if current == "receita" else t("BG_HOVER")
+            r_fg = t("BG") if current == "receita" else t("FG2")
+            lbl_r = tk.Label(toggle_frame, text="+ Receita", font=(FONT, 11, "bold"),
+                             bg=r_bg, fg=r_fg, padx=12, pady=4, cursor="hand2")
+            lbl_r.pack(side="left", padx=(0, 4))
+            lbl_r.bind("<Button-1>", lambda e: (tipo_var.set("receita"), rebuild_toggle()))
+            # - Despesa
+            d_bg = t("YELLOW") if current == "despesa" else t("BG_HOVER")
+            d_fg = t("BG") if current == "despesa" else t("FG2")
+            lbl_d = tk.Label(toggle_frame, text="- Despesa", font=(FONT, 11, "bold"),
+                             bg=d_bg, fg=d_fg, padx=12, pady=4, cursor="hand2")
+            lbl_d.pack(side="left")
+            lbl_d.bind("<Button-1>", lambda e: (tipo_var.set("despesa"), rebuild_toggle()))
+
+        rebuild_toggle()
+
+        # Entry field for amount
+        val_entry = tk.Entry(reg_frame, font=(FONT, 14), bg=t("BG_INPUT"), fg=t("DIMMED"),
+                             insertbackground=t("FG"), relief="flat",
+                             highlightbackground=t("BORDER"), highlightthickness=1)
+        val_entry.insert(0, "Valor em R$")
+        val_entry.pack(fill="x", ipady=5, pady=(0, 6))
+
+        def on_entry_focus(e):
+            if val_entry.get() == "Valor em R$":
+                val_entry.delete(0, "end")
+                val_entry.configure(fg=t("FG"))
+
+        def on_entry_blur(e):
+            if not val_entry.get().strip():
+                val_entry.insert(0, "Valor em R$")
+                val_entry.configure(fg=t("DIMMED"))
+
+        val_entry.bind("<FocusIn>", on_entry_focus)
+        val_entry.bind("<FocusOut>", on_entry_blur)
+
+        # Quick save function
+        def quick_save(e=None):
+            amt_str = val_entry.get().strip()
+            if not amt_str or amt_str == "Valor em R$":
+                return
+            try:
+                amount = float(amt_str.replace("R$", "").replace("$", "").replace(",", "."))
+                if tipo_var.get() == "despesa":
+                    amount = -abs(amount)
+            except ValueError:
+                return
+            entry = {
+                "amount": amount, "description": "Registro rapido",
+                "category": self.data.get("categories", DEFAULT_CATEGORIES)[0],
+                "type": tipo_var.get(), "timestamp": datetime.now().isoformat(),
+            }
+            self.data["entries"].append(entry)
+            goals = self._goals()
+            if goals:
+                self.data["goal_assignments"][str(len(self.data["entries"]) - 1)] = goals[0]["name"]
+            save_data(self.data)
+            self._update_icon()
+            self._try_refresh()
+            popup.destroy()
+
+        val_entry.bind("<Return>", quick_save)
+
+        # Shortcut buttons (up to 4)
+        try:
+            shortcuts = self._get_shortcuts()
+            if shortcuts:
+                sc_frame = tk.Frame(reg_frame, bg=t("BG"))
+                sc_frame.pack(fill="x", pady=(0, 4))
+                for sc in shortcuts[:4]:
+                    sc_text = f"{sc['description']} R${sc['amount']}"
+
+                    def make_sc_click(s=sc):
+                        def on_click(e=None):
+                            amt = s["amount"]
+                            if s.get("type", "receita") == "despesa":
+                                amt = -abs(amt)
+                            entry = {
+                                "amount": amt, "description": s["description"],
+                                "category": s.get("category", self.data.get("categories", DEFAULT_CATEGORIES)[0]),
+                                "type": s.get("type", "receita"), "timestamp": datetime.now().isoformat(),
+                            }
+                            self.data["entries"].append(entry)
+                            goals = self._goals()
+                            if goals:
+                                self.data["goal_assignments"][str(len(self.data["entries"]) - 1)] = goals[0]["name"]
+                            save_data(self.data)
+                            self._update_icon()
+                            self._try_refresh()
+                            popup.destroy()
+                        return on_click
+
+                    sc_btn = tk.Label(sc_frame, text=sc_text, font=(FONT, 10),
+                                      bg=t("BG_HOVER"), fg=t("FG2"), padx=8, pady=3, cursor="hand2")
+                    sc_btn.pack(side="left", padx=(0, 4))
+                    sc_btn.bind("<Button-1>", make_sc_click(sc))
+        except Exception:
+            pass
+
+        # ── 3. Actions ───────────────────────────────────────────────────
+        tk.Frame(inner, bg=t("BORDER"), height=1).pack(fill="x", padx=12, pady=6)
+
         def make_action(icon_char, label, cmd, fg_c=None):
             fg_c = fg_c or t("FG")
             btn = tk.Frame(inner, bg=t("BG"), cursor="hand2")
@@ -553,13 +676,11 @@ class Missionfy:
                 w.bind("<Leave>", leave)
                 w.bind("<Button-1>", click)
 
-        make_action("+", "Adicionar Receita", self._on_add_revenue, t("ACCENT"))
-        make_action("-", "Adicionar Despesa", self._on_add_expense, t("YELLOW"))
-        make_action("◻", "Ver Painel", self._on_show_dashboard, t("ACCENT2"))
+        make_action("\u25fb", "Ver Painel", self._on_show_dashboard, t("ACCENT2"))
 
         tk.Frame(inner, bg=t("BORDER"), height=1).pack(fill="x", padx=12, pady=6)
 
-        make_action("✕", "Sair", self._on_quit, t("RED"))
+        make_action("\u2715", "Sair", self._on_quit, t("RED"))
 
         # ── Position: above taskbar, near click ──────────────────────────
         popup.update_idletasks()
@@ -585,6 +706,7 @@ class Missionfy:
         popup.bind("<Escape>", close_popup)
         popup.bind("<FocusOut>", close_popup)
         popup.focus_force()
+        val_entry.focus_set()
         popup.mainloop()
 
     # ── Add revenue / expense ─────────────────────────────────────────────────
