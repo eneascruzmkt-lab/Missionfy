@@ -91,6 +91,7 @@ def load_data():
     data.setdefault("goal_assignments", {})
     data.setdefault("fixed_shortcuts", [])
     data.setdefault("category_rules", {})
+    data.setdefault("reflections", [])
     return data
 
 
@@ -182,6 +183,47 @@ MILESTONES = [
     ("days_30", "30 dias usando o app", "⭐", "usage_days", 30),
     ("entries_100", "100 registros", "📊", "entries", 100),
 ]
+
+CSV_PARSERS = {
+    "nubank": {
+        "encoding": "utf-8",
+        "date_col": "date",
+        "desc_col": "title",
+        "amount_col": "amount",
+        "date_format": "%Y-%m-%d",
+    },
+    "banco_do_brasil": {
+        "encoding": "latin-1",
+        "date_col": "Data",
+        "desc_col": "Histórico",
+        "amount_col": "Valor",
+        "date_format": "%d/%m/%Y",
+        "separator": ";",
+    },
+    "picpay": {
+        "encoding": "utf-8",
+        "date_col": "Data",
+        "desc_col": "Descrição",
+        "amount_col": "Valor",
+        "date_format": "%d/%m/%Y",
+    },
+    "bradesco": {
+        "encoding": "latin-1",
+        "date_col": "Data",
+        "desc_col": "Histórico",
+        "amount_col": "Valor",
+        "date_format": "%d/%m/%Y",
+        "separator": ";",
+    },
+}
+
+DEFAULT_CATEGORY_KEYWORDS = {
+    "salario": "Salário", "pagamento": "Salário",
+    "pix recebido": "Freelance", "freelance": "Freelance",
+    "investimento": "Investimento", "rendimento": "Investimento",
+    "mercado": "Outro", "farmacia": "Outro", "uber": "Outro",
+    "transferencia": "Outro",
+}
 
 
 def calc_gamification(data, goal):
@@ -1306,9 +1348,214 @@ class Missionfy:
         for goal in self._goals():
             self._draw_goal_card(parent, goal)
 
-    # ── Placeholder methods ───────────────────────────────────────────────────
+    # ── CSV Import ─────────────────────────────────────────────────────────────
+    def _categorize_entry(self, description):
+        """Categorize an entry by description. Uses learned rules first, then default keywords."""
+        desc_lower = description.lower().strip()
+        rules = self.data.get("category_rules", {})
+        for keyword, category in rules.items():
+            if keyword.lower() in desc_lower:
+                return category
+        for keyword, category in DEFAULT_CATEGORY_KEYWORDS.items():
+            if keyword in desc_lower:
+                return category
+        return "Outro"
+
     def _show_csv_import(self):
-        pass  # Will be implemented in Task 7
+        threading.Thread(target=self._csv_import_dialog, daemon=True).start()
+
+    def _csv_import_dialog(self):
+        dlg = tk.Tk()
+        dlg.title("Importar CSV")
+        dlg.configure(bg=t("BG"))
+        dlg.geometry("520x600")
+        dlg.resizable(False, True)
+        dlg.attributes("-topmost", True)
+        set_window_icon(dlg)
+        dlg.after(50, lambda: style_titlebar(dlg))
+
+        self._csv_step = 1
+        self._csv_bank = None
+        self._csv_entries = []
+        content = tk.Frame(dlg, bg=t("BG"))
+        content.pack(fill="both", expand=True, padx=24, pady=16)
+
+        def draw_step():
+            for w in content.winfo_children():
+                w.destroy()
+            if self._csv_step == 1:
+                draw_step1()
+            elif self._csv_step == 2:
+                draw_step2()
+            elif self._csv_step == 3:
+                draw_step3()
+
+        def draw_step1():
+            tk.Label(content, text="Escolha seu banco", font=(FONT, 16, "bold"),
+                     bg=t("BG"), fg=t("FG")).pack(anchor="w", pady=(0, 16))
+            banks = [("Picpay", "picpay"), ("Banco do Brasil", "banco_do_brasil"),
+                     ("Nubank", "nubank"), ("Bradesco", "bradesco")]
+            for name, key in banks:
+                btn = tk.Label(content, text=name, font=(FONT, 13),
+                               bg=t("BG_CARD"), fg=t("FG"), padx=20, pady=14,
+                               cursor="hand2", anchor="w",
+                               highlightbackground=t("BORDER"), highlightthickness=1)
+                btn.pack(fill="x", pady=(0, 6))
+                btn.bind("<Enter>", lambda e, b=btn: b.configure(bg=t("BG_HOVER")))
+                btn.bind("<Leave>", lambda e, b=btn: b.configure(bg=t("BG_CARD")))
+                def select(e=None, k=key):
+                    self._csv_bank = k
+                    self._csv_step = 2
+                    draw_step()
+                btn.bind("<Button-1>", select)
+
+        def draw_step2():
+            tk.Label(content, text="Selecione o arquivo CSV", font=(FONT, 16, "bold"),
+                     bg=t("BG"), fg=t("FG")).pack(anchor="w", pady=(0, 16))
+
+            status_label = tk.Label(content, text="", font=(FONT, 10), bg=t("BG"), fg=t("DIMMED"))
+
+            def choose_file():
+                path = filedialog.askopenfilename(
+                    title="Escolher CSV", filetypes=[("CSV", "*.csv"), ("Todos", "*.*")])
+                if not path:
+                    return
+                try:
+                    parser = CSV_PARSERS[self._csv_bank]
+                    sep = parser.get("separator", ",")
+                    enc = parser.get("encoding", "utf-8")
+                    with open(path, "r", encoding=enc) as f:
+                        reader = csv.DictReader(f, delimiter=sep)
+                        parsed = []
+                        for row in reader:
+                            try:
+                                date_str = row[parser["date_col"]].strip()
+                                desc = row[parser["desc_col"]].strip()
+                                amt_str = row[parser["amount_col"]].strip()
+                                amt_str = amt_str.replace("R$", "").replace(" ", "")
+                                # Handle Brazilian number format: 1.234,56
+                                if "," in amt_str and "." in amt_str:
+                                    amt_str = amt_str.replace(".", "").replace(",", ".")
+                                elif "," in amt_str:
+                                    amt_str = amt_str.replace(",", ".")
+                                amount = float(amt_str)
+                                dt = datetime.strptime(date_str, parser["date_format"])
+                                category = self._categorize_entry(desc)
+                                parsed.append({
+                                    "amount": amount, "description": desc,
+                                    "category": category,
+                                    "type": "receita" if amount >= 0 else "despesa",
+                                    "timestamp": dt.isoformat(),
+                                })
+                            except (ValueError, KeyError):
+                                continue
+                        self._csv_entries = parsed
+                        if parsed:
+                            self._csv_step = 3
+                            draw_step()
+                        else:
+                            status_label.configure(text="Nenhuma entrada encontrada no arquivo", fg=t("RED"))
+                            status_label.pack(pady=10)
+                except Exception as ex:
+                    status_label.configure(text=f"Erro ao ler: {ex}", fg=t("RED"))
+                    status_label.pack(pady=10)
+
+            btn = tk.Label(content, text="Escolher arquivo CSV", font=(FONT, 13, "bold"),
+                           bg=t("ACCENT"), fg="#12121a", padx=24, pady=12, cursor="hand2")
+            btn.pack(fill="x", pady=10)
+            btn.bind("<Button-1>", lambda e: choose_file())
+            status_label.pack()
+
+            back = tk.Label(content, text="Voltar", font=(FONT, 11),
+                            bg=t("BG_HOVER"), fg=t("DIMMED"), padx=16, pady=8, cursor="hand2")
+            back.pack(pady=10)
+            back.bind("<Button-1>", lambda e: (setattr(self, '_csv_step', 1), draw_step()))
+
+        def draw_step3():
+            receitas = [e for e in self._csv_entries if e["amount"] >= 0]
+            despesas = [e for e in self._csv_entries if e["amount"] < 0]
+
+            tk.Label(content, text="Revisar e confirmar", font=(FONT, 16, "bold"),
+                     bg=t("BG"), fg=t("FG")).pack(anchor="w")
+            tk.Label(content, text=f"{len(self._csv_entries)} entradas - {len(receitas)} receitas, {len(despesas)} despesas",
+                     font=(FONT, 10), bg=t("BG"), fg=t("DIMMED")).pack(anchor="w", pady=(4, 12))
+
+            # Scrollable list
+            list_frame = tk.Frame(content, bg=t("BG"))
+            list_frame.pack(fill="both", expand=True)
+
+            style = ttk.Style()
+            style.configure("CSV.TScrollbar", background=t("BG2"), troughcolor=t("BG"))
+
+            canvas = tk.Canvas(list_frame, bg=t("BG"), highlightthickness=0)
+            scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=canvas.yview, style="CSV.TScrollbar")
+            inner = tk.Frame(canvas, bg=t("BG"))
+            cf = canvas.create_window((0, 0), window=inner, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            canvas.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+            inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+            canvas.bind("<Configure>", lambda e: canvas.itemconfig(cf, width=e.width))
+            canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+
+            cats = self.data.get("categories", DEFAULT_CATEGORIES) + ["Outro"]
+
+            for i, entry in enumerate(self._csv_entries[:50]):
+                row_bg = t("BG_CARD") if i % 2 == 0 else t("BG2")
+                row = tk.Frame(inner, bg=row_bg)
+                row.pack(fill="x")
+
+                ts = entry["timestamp"][:10]
+                tk.Label(row, text=ts, font=(FONT, 9), bg=row_bg, fg=t("DIMMED"),
+                         width=10).pack(side="left", padx=4, pady=3)
+                tk.Label(row, text=entry["description"][:25], font=(FONT, 9),
+                         bg=row_bg, fg=t("FG"), width=20, anchor="w").pack(side="left", padx=4, pady=3)
+
+                amt = entry["amount"]
+                amt_c = t("ACCENT") if amt >= 0 else t("RED")
+                tk.Label(row, text=f"R${amt:,.2f}", font=(FONT, 9, "bold"),
+                         bg=row_bg, fg=amt_c, width=10).pack(side="left", padx=4, pady=3)
+
+                cat_var = tk.StringVar(value=entry["category"])
+                cat_menu = ttk.Combobox(row, textvariable=cat_var, values=cats,
+                                        width=10, state="readonly")
+                cat_menu.pack(side="left", padx=4, pady=3)
+                def on_cat_change(e=None, idx=i, var=cat_var, desc=entry["description"]):
+                    self._csv_entries[idx]["category"] = var.get()
+                    key = desc.strip()
+                    if key:
+                        self.data.setdefault("category_rules", {})[key] = var.get()
+                cat_menu.bind("<<ComboboxSelected>>", on_cat_change)
+
+            # Buttons
+            btn_row = tk.Frame(content, bg=t("BG"))
+            btn_row.pack(fill="x", pady=(12, 0))
+
+            def confirm_import():
+                goals = self._goals()
+                goal_name = goals[0]["name"] if goals else ""
+                for entry in self._csv_entries:
+                    self.data["entries"].append(entry)
+                    self.data["goal_assignments"][str(len(self.data["entries"]) - 1)] = goal_name
+                save_data(self.data)
+                self._update_icon()
+                self._try_refresh()
+                dlg.destroy()
+
+            confirm = tk.Label(btn_row, text=f"Confirmar {len(self._csv_entries)} entradas",
+                              font=(FONT, 12, "bold"), bg=t("ACCENT"), fg="#12121a",
+                              padx=24, pady=10, cursor="hand2")
+            confirm.pack(side="left", fill="x", expand=True)
+            confirm.bind("<Button-1>", lambda e: confirm_import())
+
+            back = tk.Label(btn_row, text="Voltar", font=(FONT, 11),
+                            bg=t("BG_HOVER"), fg=t("DIMMED"), padx=16, pady=10, cursor="hand2")
+            back.pack(side="right", padx=(8, 0))
+            back.bind("<Button-1>", lambda e: (setattr(self, '_csv_step', 2), draw_step()))
+
+        draw_step()
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        dlg.mainloop()
 
     def _show_config_window(self):
         threading.Thread(target=self._config_dialog, daemon=True).start()
@@ -2503,6 +2750,104 @@ class Missionfy:
                 pass
         icon.stop()
 
+    # ── Reflection Dialog ─────────────────────────────────────────────────────
+    def _show_reflection_dialog(self):
+        dlg = tk.Tk()
+        dlg.title("Reflexao da Semana")
+        dlg.configure(bg=t("BG"))
+        dlg.geometry("400x380")
+        dlg.resizable(False, False)
+        dlg.attributes("-topmost", True)
+        set_window_icon(dlg)
+        dlg.after(50, lambda: style_titlebar(dlg))
+
+        PAD = 24
+
+        # Auto summary
+        entries = self.data["entries"]
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())
+        week_entries = [e for e in entries if e["timestamp"][:10] >= week_start.isoformat()]
+        week_rev = sum(e["amount"] for e in week_entries if e["amount"] > 0)
+
+        goal = self._main_goal()
+        ents_goal = entries_for_goal(self.data, goal["name"])
+        rev_goal = [e for e in ents_goal if e["amount"] > 0]
+        total = sum(e["amount"] for e in rev_goal)
+        remaining = max(goal["amount"] - total, 0)
+        dl = days_left(goal)
+        daily_needed = remaining / dl if dl > 0 else 0
+
+        week_days_hit = 0
+        for i in range(min(today.weekday() + 1, 7)):
+            d = week_start + timedelta(days=i)
+            day_total = sum(e["amount"] for e in rev_goal if e["amount"] > 0 and e["timestamp"][:10] == d.isoformat())
+            if day_total >= daily_needed and daily_needed > 0:
+                week_days_hit += 1
+
+        tk.Label(dlg, text="Como foi sua semana?", font=(FONT, 16, "bold"),
+                 bg=t("BG"), fg=t("FG")).pack(padx=PAD, pady=(20, 0), anchor="w")
+
+        summary = f"Voce registrou R${week_rev:,.2f} esta semana"
+        if daily_needed > 0:
+            summary += f", bateu a meta {week_days_hit} de {min(today.weekday() + 1, 7)} dias"
+        tk.Label(dlg, text=summary, font=(FONT, 10), bg=t("BG"), fg=t("DIMMED"),
+                 wraplength=350).pack(padx=PAD, pady=(8, 16), anchor="w")
+
+        # Feeling buttons
+        selected = tk.StringVar(value="")
+        feelings = [
+            ("\U0001f604 Otima", "otima", t("ACCENT")),
+            ("\U0001f642 Boa", "boa", t("YELLOW")),
+            ("\U0001f610 Podia ser melhor", "podia_ser_melhor", t("RED")),
+        ]
+        feel_frame = tk.Frame(dlg, bg=t("BG"))
+        feel_frame.pack(padx=PAD, fill="x")
+
+        for text, val, color in feelings:
+            btn = tk.Label(feel_frame, text=text, font=(FONT, 13),
+                           bg=t("BG_CARD"), fg=t("FG"), padx=16, pady=10,
+                           cursor="hand2", highlightbackground=t("BORDER"), highlightthickness=1)
+            btn.pack(fill="x", pady=(0, 6))
+            def select(e=None, v=val, b=btn, c=color):
+                selected.set(v)
+                for w in feel_frame.winfo_children():
+                    w.configure(bg=t("BG_CARD"), highlightbackground=t("BORDER"))
+                b.configure(bg=c, highlightbackground=c)
+            btn.bind("<Button-1>", select)
+
+        # Optional note
+        tk.Label(dlg, text="Uma palavra sobre a semana (opcional)", font=(FONT, 10),
+                 bg=t("BG"), fg=t("DIMMED")).pack(padx=PAD, pady=(12, 4), anchor="w")
+        note_entry = tk.Entry(dlg, font=(FONT, 12), bg=t("BG_INPUT"), fg=t("FG"),
+                              insertbackground=t("FG"), relief="flat",
+                              highlightbackground=t("BORDER"), highlightthickness=1)
+        note_entry.pack(padx=PAD, fill="x", ipady=5)
+
+        def save_reflection():
+            if not selected.get():
+                return
+            week_key = datetime.now().strftime("%Y-W%U")
+            self.data.setdefault("reflections", []).append({
+                "week": week_key,
+                "feeling": selected.get(),
+                "note": note_entry.get().strip(),
+                "revenue": week_rev,
+                "days_hit": week_days_hit,
+                "timestamp": datetime.now().isoformat(),
+            })
+            save_data(self.data)
+            self._try_refresh()
+            dlg.destroy()
+
+        save_btn = tk.Label(dlg, text="Salvar", font=(FONT, 12, "bold"),
+                            bg=t("ACCENT"), fg="#12121a", padx=24, pady=10, cursor="hand2")
+        save_btn.pack(padx=PAD, fill="x", pady=(16, 0))
+        save_btn.bind("<Button-1>", lambda e: save_reflection())
+
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        dlg.mainloop()
+
     # ── Run ───────────────────────────────────────────────────────────────────
     def run(self):
         # Backup timer
@@ -2583,6 +2928,31 @@ class Missionfy:
                 except Exception:
                     pass
         threading.Thread(target=pulse_loop, daemon=True).start()
+
+        def reflection_loop():
+            import time
+            while True:
+                now = datetime.now()
+                # Sunday at 20:00
+                if now.weekday() == 6 and now.hour == 20 and now.minute == 0:
+                    week_key = now.strftime("%Y-W%U")
+                    reflections = self.data.get("reflections", [])
+                    already = any(r["week"] == week_key for r in reflections)
+                    if not already:
+                        # Try native notification
+                        try:
+                            from plyer import notification
+                            notification.notify(
+                                title="Missionfy - Reflexao da Semana",
+                                message="Como foi sua semana? Clique pra avaliar",
+                                app_icon=ICO_FILE if os.path.exists(ICO_FILE) else None,
+                                timeout=10
+                            )
+                        except Exception:
+                            pass
+                        threading.Thread(target=self._show_reflection_dialog, daemon=True).start()
+                time.sleep(60)
+        threading.Thread(target=reflection_loop, daemon=True).start()
 
         self.icon = CustomIcon(
             "Missionfy",
