@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+installer_output/
+backups/
+money_mission_data.json
+*.zip
+poppins.zip
+innosetup.exe
