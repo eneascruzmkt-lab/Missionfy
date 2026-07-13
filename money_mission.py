@@ -168,6 +168,21 @@ MEDALS = [
     ("entries_50", "50 Registros", "Fez 50 registros", "📊"),
 ]
 
+MILESTONES = [
+    # (id, name, icon, type, threshold)
+    ("val_100", "Primeiro R$100", "💵", "value", 100),
+    ("val_500", "Primeiro R$500", "💰", "value", 500),
+    ("val_1000", "Primeiro R$1.000", "🤑", "value", 1000),
+    ("val_5000", "Primeiro R$5.000", "💎", "value", 5000),
+    ("val_10000", "Primeiro R$10.000", "👑", "value", 10000),
+    ("week_complete", "Primeira semana completa", "📅", "streak", 7),
+    ("month_above", "Primeiro mes acima da meta", "🏅", "month_above", 1),
+    ("3months_above", "3 meses seguidos acima da meta", "🏆", "month_above", 3),
+    ("days_7", "7 dias usando o app", "📱", "usage_days", 7),
+    ("days_30", "30 dias usando o app", "⭐", "usage_days", 30),
+    ("entries_100", "100 registros", "📊", "entries", 100),
+]
+
 
 def calc_gamification(data, goal):
     entries = data.get("entries", [])
@@ -441,6 +456,32 @@ class Missionfy:
                 combined.append(s)
 
         return combined[:4]
+
+    # ── Milestones ─────────────────────────────────────────────────────────────
+    def _get_earned_milestones(self):
+        """Return list of (icon, name) tuples for earned milestones."""
+        entries = self.data.get("entries", [])
+        revenue = [e for e in entries if e["amount"] > 0]
+        total_rev = sum(e["amount"] for e in revenue)
+        gm = calc_gamification(self.data, self._main_goal())
+        usage_days = len(set(e["timestamp"][:10] for e in entries))
+
+        earned = []
+        for mid, name, icon, mtype, val in MILESTONES:
+            unlocked = False
+            if mtype == "value":
+                unlocked = total_rev >= val
+            elif mtype == "streak":
+                unlocked = gm["streak"] >= val
+            elif mtype == "entries":
+                unlocked = len(revenue) >= val
+            elif mtype == "usage_days":
+                unlocked = usage_days >= val
+            elif mtype == "month_above":
+                unlocked = False  # simplified - would need monthly data
+            if unlocked:
+                earned.append((icon, name))
+        return earned
 
     # ── Custom popup menu ─────────────────────────────────────────────────────
     def _show_tray_popup(self, icon, item=None):
@@ -1169,15 +1210,91 @@ class Missionfy:
                 tk.Label(sq, text=f"R${amt_text}", font=(FONT, 7),
                          bg=sq_bg, fg=sq_fg).pack(expand=True)
 
-    # ── Seção: Sua Jornada (placeholder) ──────────────────────────────────────
+    # ── Seção: Sua Jornada ─────────────────────────────────────────────────────
     def _draw_sua_jornada(self, parent):
         PAD = 24
+        entries = [e for e in self.data["entries"] if e["amount"] > 0]
+        if not entries:
+            return
+
         sec = tk.Frame(parent, bg=t("BG"))
         sec.pack(fill="x", padx=PAD, pady=(16, 4))
         tk.Label(sec, text="SUA JORNADA", font=(FONT, 10, "bold"),
                  bg=t("BG"), fg=t("DIMMED")).pack(anchor="w")
-        tk.Label(sec, text="Em breve", font=(FONT, 11),
-                 bg=t("BG"), fg=t("DIMMED")).pack(anchor="w", pady=(4, 0))
+
+        # Weekly chart
+        card = tk.Frame(parent, bg=t("BG_CARD"), highlightbackground=t("BORDER"), highlightthickness=1)
+        card.pack(fill="x", padx=PAD, pady=(4, 0))
+
+        cw, ch = 500, 180
+        c = tk.Canvas(card, width=cw, height=ch, bg=t("BG_CARD"), highlightthickness=0)
+        c.pack(padx=12, pady=12, fill="x")
+
+        today = date.today()
+        weeks = []
+        for w in range(7, -1, -1):
+            week_start = today - timedelta(days=today.weekday() + 7 * w)
+            week_end = week_start + timedelta(days=6)
+            week_total = sum(e["amount"] for e in entries
+                            if week_start.isoformat() <= e["timestamp"][:10] <= week_end.isoformat())
+            weeks.append({"start": week_start, "total": week_total})
+
+        max_val = max((w["total"] for w in weeks), default=1) or 1
+        pl, pr, pt, pb = 60, 12, 12, 30
+        pw, ph = cw - pl - pr, ch - pt - pb
+
+        for i, w in enumerate(weeks):
+            x = pl + ((i + 0.5) / len(weeks)) * pw
+            y_top = pt + ph * (1 - w["total"] / (max_val * 1.15))
+            y_bot = pt + ph
+            bar_w = pw / len(weeks) * 0.6
+
+            c.create_rectangle(x - bar_w/2, y_top, x + bar_w/2, y_bot,
+                              fill=t("ACCENT"), outline="")
+            label = w["start"].strftime("%d/%m")
+            c.create_text(x, ch - 8, text=label, fill=t("DIMMED"), font=(FONT, 7))
+            if w["total"] > 0:
+                c.create_text(x, y_top - 10, text=f"R${w['total']:,.0f}",
+                             fill=t("FG"), font=(FONT, 7))
+
+        # Milestones earned
+        try:
+            milestones = self._get_earned_milestones()
+        except AttributeError:
+            milestones = []
+
+        if milestones:
+            ms_frame = tk.Frame(parent, bg=t("BG_CARD"), highlightbackground=t("BORDER"), highlightthickness=1)
+            ms_frame.pack(fill="x", padx=PAD, pady=(4, 0))
+            ms_inner = tk.Frame(ms_frame, bg=t("BG_CARD"), padx=16, pady=10)
+            ms_inner.pack(fill="x")
+            tk.Label(ms_inner, text="MARCOS CONQUISTADOS", font=(FONT, 9, "bold"),
+                     bg=t("BG_CARD"), fg=t("DIMMED")).pack(anchor="w", pady=(0, 6))
+            for icon, name in milestones:
+                mf = tk.Frame(ms_inner, bg=t("BG_CARD"))
+                mf.pack(fill="x", pady=2)
+                tk.Label(mf, text=icon, font=(FONT, 14), bg=t("BG_CARD")).pack(side="left", padx=(0, 8))
+                tk.Label(mf, text=name, font=(FONT, 11), bg=t("BG_CARD"), fg=t("FG")).pack(side="left")
+
+        # Reflections history
+        reflections = self.data.get("reflections", [])
+        if reflections:
+            ref_frame = tk.Frame(parent, bg=t("BG_CARD"), highlightbackground=t("BORDER"), highlightthickness=1)
+            ref_frame.pack(fill="x", padx=PAD, pady=(4, 0))
+            ref_inner = tk.Frame(ref_frame, bg=t("BG_CARD"), padx=16, pady=10)
+            ref_inner.pack(fill="x")
+            tk.Label(ref_inner, text="SUAS REFLEXOES", font=(FONT, 9, "bold"),
+                     bg=t("BG_CARD"), fg=t("DIMMED")).pack(anchor="w", pady=(0, 6))
+            feelings_map = {"otima": "\U0001f604", "boa": "\U0001f642", "podia_ser_melhor": "\U0001f610"}
+            for r in reflections[-4:]:
+                rf = tk.Frame(ref_inner, bg=t("BG_CARD"))
+                rf.pack(fill="x", pady=2)
+                emoji = feelings_map.get(r.get("feeling", ""), "")
+                tk.Label(rf, text=f"{emoji} Semana de {r['week']}", font=(FONT, 10),
+                         bg=t("BG_CARD"), fg=t("FG")).pack(side="left")
+                if r.get("note"):
+                    tk.Label(rf, text=f"- {r['note']}", font=(FONT, 9),
+                             bg=t("BG_CARD"), fg=t("DIMMED")).pack(side="left", padx=(8, 0))
 
     # ── Seção: Suas Metas ─────────────────────────────────────────────────────
     def _draw_suas_metas(self, parent):
