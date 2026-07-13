@@ -1338,6 +1338,45 @@ class Missionfy:
                     tk.Label(rf, text=f"- {r['note']}", font=(FONT, 9),
                              bg=t("BG_CARD"), fg=t("DIMMED")).pack(side="left", padx=(8, 0))
 
+        # ── 30-day calendar ──
+        cal_card = tk.Frame(parent, bg=t("BG_CARD"), highlightbackground=t("BORDER"), highlightthickness=1)
+        cal_card.pack(fill="x", padx=PAD, pady=(4, 0))
+        cal_inner = tk.Frame(cal_card, bg=t("BG_CARD"), padx=16, pady=10)
+        cal_inner.pack(fill="x")
+
+        tk.Label(cal_inner, text="ULTIMOS 30 DIAS", font=(FONT, 9, "bold"),
+                 bg=t("BG_CARD"), fg=t("DIMMED")).pack(anchor="w", pady=(0, 8))
+
+        goal = self._main_goal()
+        rev_entries = [e for e in self.data["entries"] if e["amount"] > 0]
+        total_rev = sum(e["amount"] for e in rev_entries)
+        rem = max(goal["amount"] - total_rev, 0)
+        dl_val = max(days_left(goal), 1)
+        daily_needed = rem / dl_val
+
+        grid = tk.Frame(cal_inner, bg=t("BG_CARD"))
+        grid.pack(fill="x")
+
+        today = date.today()
+        for i in range(30):
+            d = today - timedelta(days=29 - i)
+            day_str = d.isoformat()
+            day_total = sum(e["amount"] for e in rev_entries if e["timestamp"][:10] == day_str)
+
+            if day_total >= daily_needed and daily_needed > 0:
+                color = t("ACCENT")
+            elif day_total > 0:
+                color = t("YELLOW")
+            else:
+                color = t("BAR_BG")
+
+            row, col = divmod(i, 10)
+            sq = tk.Frame(grid, bg=color, width=20, height=20,
+                          highlightbackground=t("BORDER") if d != today else t("ACCENT"),
+                          highlightthickness=1 if d != today else 2)
+            sq.grid(row=row, column=col, padx=2, pady=2)
+            sq.grid_propagate(False)
+
     # ── Seção: Suas Metas ─────────────────────────────────────────────────────
     def _draw_suas_metas(self, parent):
         PAD = 24
@@ -1561,7 +1600,37 @@ class Missionfy:
         threading.Thread(target=self._config_dialog, daemon=True).start()
 
     def _config_dialog(self):
-        pass  # Will be implemented in Task 9
+        dlg = tk.Tk()
+        dlg.title("Missionfy - Configuracoes")
+        dlg.configure(bg=t("BG"))
+        dlg.geometry("600x700")
+        dlg.resizable(True, True)
+        dlg.attributes("-topmost", True)
+        set_window_icon(dlg)
+        dlg.after(50, lambda: style_titlebar(dlg))
+
+        # Scroll area
+        canvas = tk.Canvas(dlg, bg=t("BG"), highlightthickness=0)
+        scrollbar = ttk.Scrollbar(dlg, orient="vertical", command=canvas.yview)
+        frame = tk.Frame(canvas, bg=t("BG"))
+        cf = canvas.create_window((0, 0), window=frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(cf, width=e.width))
+        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+
+        tk.Label(frame, text="Configuracoes", font=(FONT, 16, "bold"),
+                 bg=t("BG"), fg=t("FG")).pack(padx=24, pady=(16, 12), anchor="w")
+
+        # Reuse existing methods
+        self._draw_settings(frame)
+        self._draw_history(frame)
+
+        tk.Frame(frame, bg=t("BG"), height=20).pack()
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        dlg.mainloop()
 
     # ── Tab: Receitas (inline form) ───────────────────────────────────────────
     def _draw_tab_receitas(self, parent):
