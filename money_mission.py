@@ -843,10 +843,13 @@ class Missionfy:
         tk.Label(form, text="CATEGORIA", font=(FONT, 12), bg=t("BG"), fg=t("DIMMED")).pack(anchor="w", pady=(12, 3))
         cat_frame = tk.Frame(form, bg=t("BG"))
         cat_frame.pack(fill="x")
+        cat_frame.columnconfigure(0, weight=1)
+        cat_frame.columnconfigure(1, weight=1)
+        cat_frame.columnconfigure(2, weight=1)
         selected_cat = tk.StringVar(value=cats[0] if cats else "Outro")
 
-        for cat in cats:
-            def make_cat_btn(c):
+        for idx, cat in enumerate(cats):
+            def make_cat_btn(c, i):
                 btn = tk.Label(cat_frame, text=c, font=(FONT, 12), padx=10, pady=4, cursor="hand2",
                                bg=t("BG_HOVER"), fg=t("FG"))
                 def select(e=None):
@@ -855,9 +858,10 @@ class Missionfy:
                         w.configure(bg=t("BG_HOVER"), fg=t("FG"))
                     btn.configure(bg=accent, fg=t("BG"))
                 btn.bind("<Button-1>", select)
-                btn.pack(side="left", padx=(0, 4), pady=2)
+                row, col = divmod(i, 3)
+                btn.grid(row=row, column=col, padx=(0, 4), pady=2, sticky="ew")
                 return btn
-            b = make_cat_btn(cat)
+            b = make_cat_btn(cat, idx)
             if cat == cats[0]:
                 b.configure(bg=accent, fg=t("BG"))
 
@@ -931,17 +935,17 @@ class Missionfy:
                 pass
 
         btn_row = tk.Frame(dlg, bg=t("BG"))
-        btn_row.pack(pady=(18, 0))
+        btn_row.pack(fill="x", padx=25, pady=(18, 0))
 
         save_btn = tk.Label(btn_row, text=f"Salvar {tipo.title()}", font=(FONT, 12),
-                            bg=accent, fg=t("BG"), padx=24, pady=7, cursor="hand2")
+                            bg=accent, fg=t("BG"), pady=10, cursor="hand2")
         save_btn.bind("<Button-1>", lambda e: save())
-        save_btn.pack(side="left", padx=5)
+        save_btn.pack(side="left", fill="x", expand=True, padx=(0, 4))
 
         cancel_btn = tk.Label(btn_row, text="Cancelar", font=(FONT, 12),
-                              bg=t("BG_HOVER"), fg=t("DIMMED"), padx=24, pady=7, cursor="hand2")
+                              bg=t("BG_HOVER"), fg=t("DIMMED"), pady=10, cursor="hand2")
         cancel_btn.bind("<Button-1>", lambda e: dlg.destroy())
-        cancel_btn.pack(side="left", padx=5)
+        cancel_btn.pack(side="left", fill="x", expand=True, padx=(4, 0))
 
         # Enter to save
         dlg.bind("<Return>", lambda e: save())
@@ -1630,6 +1634,13 @@ class Missionfy:
         tk.Label(frame, text="Configuracoes", font=(FONT, 16, "bold"),
                  bg=t("BG"), fg=t("FG")).pack(padx=24, pady=(16, 12), anchor="w")
 
+        # Gerenciar Metas e Categorias
+        mgmt = tk.Frame(frame, bg=t("BG"))
+        mgmt.pack(fill="x", padx=24, pady=(0, 12))
+        self._btn(mgmt, "Gerenciar Metas", lambda: (dlg.destroy(), self._manage_goals()), t("BLUE_DIM"), t("ACCENT2"), 11).pack(side="left", padx=(0, 6))
+        self._btn(mgmt, "+ Nova Meta", lambda: (dlg.destroy(), self._add_goal()), t("GREEN_DIM"), t("ACCENT"), 11).pack(side="left", padx=(0, 6))
+        self._btn(mgmt, "Categorias", lambda: (dlg.destroy(), self._manage_categories()), t("BG_HOVER"), t("YELLOW"), 11).pack(side="left")
+
         # Reuse existing methods
         self._draw_settings(frame)
         self._draw_history(frame)
@@ -1664,21 +1675,15 @@ class Missionfy:
 
             card = tk.Frame(choice_row, bg=card_bg, highlightbackground=t("BORDER"),
                            highlightthickness=1, cursor="hand2")
-            card.pack(side="left", fill="x", expand=True, padx=(0, 6))
+            card.pack(side="left", fill="x", expand=True, padx=3)
 
-            inner_c = tk.Frame(card, bg=card_bg, padx=16, pady=12)
-            inner_c.pack(fill="x")
+            inner_c = tk.Frame(card, bg=card_bg, padx=16, pady=14)
+            inner_c.pack(fill="both", expand=True)
 
-            top = tk.Frame(inner_c, bg=card_bg)
-            top.pack(fill="x")
-            tk.Label(top, text=icon_char, font=(FONT, 18),
-                     bg=card_bg, fg=card_fg).pack(side="left", padx=(0, 8))
-            title_f = tk.Frame(top, bg=card_bg)
-            title_f.pack(side="left")
-            tk.Label(title_f, text=text, font=(FONT, 13, "bold"),
-                     bg=card_bg, fg=card_fg).pack(anchor="w")
-            tk.Label(title_f, text=subtitle, font=(FONT, 9),
-                     bg=card_bg, fg=sub_fg).pack(anchor="w")
+            tk.Label(inner_c, text=f"{icon_char}  {text}", font=(FONT, 14, "bold"),
+                     bg=card_bg, fg=card_fg).pack(anchor="center")
+            tk.Label(inner_c, text=subtitle, font=(FONT, 9),
+                     bg=card_bg, fg=sub_fg).pack(anchor="center")
 
             def select(e=None):
                 tipo_var.set(val)
@@ -1688,7 +1693,7 @@ class Missionfy:
                 make_tipo_card("Receita", "Dinheiro que entrou", "receita", t("ACCENT"), "+")
                 make_tipo_card("Despesa", "Dinheiro que saiu", "despesa", t("RED"), "−")
 
-            for w in [card, inner_c, top] + list(top.winfo_children()) + list(title_f.winfo_children()):
+            for w in [card, inner_c] + list(inner_c.winfo_children()):
                 w.bind("<Button-1>", select)
 
         make_tipo_card("Receita", "Dinheiro que entrou", "receita", t("ACCENT"), "+")
@@ -1723,10 +1728,13 @@ class Missionfy:
                  bg=t("BG_CARD"), fg=t("DIMMED")).pack(anchor="w", pady=(10, 3))
         cat_frame = tk.Frame(inner, bg=t("BG_CARD"))
         cat_frame.pack(fill="x")
+        cat_frame.columnconfigure(0, weight=1)
+        cat_frame.columnconfigure(1, weight=1)
+        cat_frame.columnconfigure(2, weight=1)
         selected_cat = tk.StringVar(value=cats[0] if cats else "Outro")
 
-        for cat in cats:
-            def make_cat_btn(c):
+        for idx, cat in enumerate(cats):
+            def make_cat_btn(c, i):
                 is_sel = c == selected_cat.get()
                 btn = tk.Label(cat_frame, text=c, font=(FONT, 10),
                                padx=10, pady=4, cursor="hand2",
@@ -1738,8 +1746,9 @@ class Missionfy:
                         w.configure(bg=t("BG_HOVER"), fg=t("FG"))
                     btn.configure(bg=t("ACCENT2"), fg=t("BG"))
                 btn.bind("<Button-1>", select)
-                btn.pack(side="left", padx=(0, 4), pady=2)
-            make_cat_btn(cat)
+                row, col = divmod(i, 3)
+                btn.grid(row=row, column=col, padx=(0, 4), pady=2, sticky="ew")
+            make_cat_btn(cat, idx)
 
         # Meta (se mais de uma)
         goals = self._goals()
@@ -1808,11 +1817,11 @@ class Missionfy:
         save_row = tk.Frame(inner, bg=t("BG_CARD"))
         save_row.pack(fill="x", pady=(14, 0))
         save_btn = tk.Label(save_row, text="Salvar", font=(FONT, 12, "bold"),
-                            bg=t("ACCENT"), fg=t("BG"), padx=28, pady=8, cursor="hand2")
+                            bg=t("ACCENT"), fg=t("BG"), pady=10, cursor="hand2")
         save_btn.bind("<Button-1>", lambda e: save())
         save_btn.bind("<Enter>", lambda e: save_btn.configure(bg=self._lighten(t("ACCENT"))))
         save_btn.bind("<Leave>", lambda e: save_btn.configure(bg=t("ACCENT")))
-        save_btn.pack(side="left")
+        save_btn.pack(fill="x")
 
         # Enter to save
         def on_enter(e):
@@ -2323,20 +2332,19 @@ class Missionfy:
 
     # ── Manage Goals ──────────────────────────────────────────────────────────
     def _manage_goals(self):
-        win = self.dashboard_window
-        if not win:
-            return
+        threading.Thread(target=self._manage_goals_dialog, daemon=True).start()
+
+    def _manage_goals_dialog(self):
         goals = self.data.get("goals", [])
         if not goals:
             return
 
-        dlg = tk.Toplevel(win)
+        dlg = tk.Tk()
         dlg.title("Gerenciar Missões")
         dlg.configure(bg=t("BG"))
         dlg.geometry("420x400")
         dlg.resizable(False, False)
         dlg.attributes("-topmost", True)
-        dlg.grab_set()
         set_window_icon(dlg)
         dlg.after(50, lambda: style_titlebar(dlg))
 
@@ -2374,19 +2382,17 @@ class Missionfy:
                 w.bind("<Enter>", lambda e, r=row, bg=row_bg: [c.configure(bg=t("BG_HOVER")) for c in [r] + list(r.winfo_children()) + [w for f in r.winfo_children() for w in f.winfo_children() if isinstance(f, tk.Frame)]])
                 w.bind("<Leave>", lambda e, r=row, bg=row_bg: [c.configure(bg=bg) for c in [r] + list(r.winfo_children()) + [w for f in r.winfo_children() for w in f.winfo_children() if isinstance(f, tk.Frame)]])
 
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        dlg.mainloop()
+
     def _goal_form(self, title, values, on_save, on_delete=None):
         """Shared form for editing and creating goals."""
-        win = self.dashboard_window
-        if not win:
-            return
-
-        dlg = tk.Toplevel(win)
+        dlg = tk.Tk()
         dlg.title(title)
         dlg.configure(bg=t("BG"))
         dlg.geometry("480x520")
         dlg.resizable(False, False)
         dlg.attributes("-topmost", True)
-        dlg.grab_set()
         set_window_icon(dlg)
         dlg.after(50, lambda: style_titlebar(dlg))
 
@@ -2417,16 +2423,22 @@ class Missionfy:
         fields["amount"].pack(fill="x", ipady=5)
 
         # Data início
-        tk.Label(form, text="DATA INÍCIO", font=(FONT, 10),
+        tk.Label(form, text="DATA INICIO (dd/mm/aaaa)", font=(FONT, 10),
                  bg=t("BG"), fg=t("DIMMED")).pack(anchor="w", pady=(10, 3))
         fields["start_date"] = tk.Entry(form, font=(FONT, 12), bg=t("BG_INPUT"), fg=t("FG"),
                                         insertbackground=t("FG"), relief="flat",
                                         highlightbackground=t("BORDER"), highlightthickness=1)
-        fields["start_date"].insert(0, values.get("start_date", date.today().isoformat()))
+        sd_val = values.get("start_date", date.today().isoformat())
+        try:
+            sd_parsed = date.fromisoformat(sd_val)
+            sd_display = sd_parsed.strftime("%d/%m/%Y")
+        except (ValueError, TypeError):
+            sd_display = sd_val
+        fields["start_date"].insert(0, sd_display)
         fields["start_date"].pack(fill="x", ipady=5)
 
         # Data limite com atalhos
-        tk.Label(form, text="DATA LIMITE", font=(FONT, 10),
+        tk.Label(form, text="DATA LIMITE (dd/mm/aaaa)", font=(FONT, 10),
                  bg=t("BG"), fg=t("DIMMED")).pack(anchor="w", pady=(10, 3))
 
         shortcut_row = tk.Frame(form, bg=t("BG"))
@@ -2438,7 +2450,7 @@ class Missionfy:
                 def click(e=None):
                     end = date.today() + timedelta(days=d)
                     fields["end_date"].delete(0, tk.END)
-                    fields["end_date"].insert(0, end.isoformat())
+                    fields["end_date"].insert(0, end.strftime("%d/%m/%Y"))
                     for w in shortcut_row.winfo_children():
                         w.configure(bg=t("BG_HOVER"), fg=t("DIMMED"))
                     btn.configure(bg=t("ACCENT"), fg=t("BG"))
@@ -2449,7 +2461,13 @@ class Missionfy:
         fields["end_date"] = tk.Entry(form, font=(FONT, 12), bg=t("BG_INPUT"), fg=t("FG"),
                                       insertbackground=t("FG"), relief="flat",
                                       highlightbackground=t("BORDER"), highlightthickness=1)
-        fields["end_date"].insert(0, values.get("end_date", (date.today() + timedelta(days=365)).isoformat()))
+        ed_val = values.get("end_date", (date.today() + timedelta(days=365)).isoformat())
+        try:
+            ed_parsed = date.fromisoformat(ed_val)
+            ed_display = ed_parsed.strftime("%d/%m/%Y")
+        except (ValueError, TypeError):
+            ed_display = ed_val
+        fields["end_date"].insert(0, ed_display)
         fields["end_date"].pack(fill="x", ipady=5)
 
         fields["name"].focus_set()
@@ -2458,14 +2476,23 @@ class Missionfy:
             try:
                 nm = fields["name"].get().strip()
                 if not nm:
-                    raise ValueError("Nome é obrigatório")
+                    raise ValueError("Nome e obrigatorio")
                 amt = float(fields["amount"].get().strip().replace(",", "."))
-                sd = fields["start_date"].get().strip()
-                ed = fields["end_date"].get().strip()
-                date.fromisoformat(sd)
-                date.fromisoformat(ed)
+                sd_raw = fields["start_date"].get().strip()
+                ed_raw = fields["end_date"].get().strip()
+                # Aceitar dd/mm/aaaa ou aaaa-mm-dd
+                try:
+                    sd = datetime.strptime(sd_raw, "%d/%m/%Y").date().isoformat()
+                except ValueError:
+                    sd = sd_raw
+                    date.fromisoformat(sd)
+                try:
+                    ed = datetime.strptime(ed_raw, "%d/%m/%Y").date().isoformat()
+                except ValueError:
+                    ed = ed_raw
+                    date.fromisoformat(ed)
             except (ValueError, TypeError) as ex:
-                messagebox.showerror("Erro", str(ex), parent=dlg)
+                messagebox.showerror("Erro", f"Verifique os campos.\n{ex}", parent=dlg)
                 return
             on_save(nm, amt, sd, ed)
             dlg.destroy()
@@ -2501,38 +2528,43 @@ class Missionfy:
 
         dlg.bind("<Return>", lambda e: do_save())
         dlg.bind("<Escape>", lambda e: dlg.destroy())
+        dlg.mainloop()
 
     def _edit_goal(self, gi, g):
-        def on_save(nm, amt, sd, ed):
-            old = self.data["goals"][gi]["name"]
-            self.data["goals"][gi] = {"name": nm, "amount": amt, "start_date": sd, "end_date": ed}
-            if nm != old:
-                for k, v in self.data.get("goal_assignments", {}).items():
-                    if v == old:
-                        self.data["goal_assignments"][k] = nm
-            save_data(self.data)
+        def _do():
+            def on_save(nm, amt, sd, ed):
+                old = self.data["goals"][gi]["name"]
+                self.data["goals"][gi] = {"name": nm, "amount": amt, "start_date": sd, "end_date": ed}
+                if nm != old:
+                    for k, v in self.data.get("goal_assignments", {}).items():
+                        if v == old:
+                            self.data["goal_assignments"][k] = nm
+                save_data(self.data)
 
-        def on_delete():
-            self.data["goals"].pop(gi)
-            save_data(self.data)
+            def on_delete():
+                self.data["goals"].pop(gi)
+                save_data(self.data)
 
-        self._goal_form(
-            f"Editar — {g['name']}",
-            {"name": g["name"], "amount": str(g["amount"]), "start_date": g["start_date"], "end_date": g["end_date"]},
-            on_save, on_delete,
-        )
+            self._goal_form(
+                f"Editar — {g['name']}",
+                {"name": g["name"], "amount": str(g["amount"]), "start_date": g["start_date"], "end_date": g["end_date"]},
+                on_save, on_delete,
+            )
+        threading.Thread(target=_do, daemon=True).start()
 
     def _add_goal(self):
-        def on_save(nm, amt, sd, ed):
-            self.data.setdefault("goals", []).append({"name": nm, "amount": amt, "start_date": sd, "end_date": ed})
-            save_data(self.data)
+        def _do():
+            def on_save(nm, amt, sd, ed):
+                self.data.setdefault("goals", []).append({"name": nm, "amount": amt, "start_date": sd, "end_date": ed})
+                save_data(self.data)
 
-        self._goal_form(
-            "Nova Missão",
-            {"name": "", "amount": "", "start_date": date.today().isoformat(),
-             "end_date": (date.today() + timedelta(days=365)).isoformat()},
-            on_save,
-        )
+            self._goal_form(
+                "Nova Missão",
+                {"name": "", "amount": "", "start_date": date.today().isoformat(),
+                 "end_date": (date.today() + timedelta(days=365)).isoformat()},
+                on_save,
+            )
+        threading.Thread(target=_do, daemon=True).start()
 
     # ── Theme Toggle ──────────────────────────────────────────────────────────
     def _toggle_theme(self):
@@ -2591,17 +2623,15 @@ class Missionfy:
 
     # ── Manage Categories ─────────────────────────────────────────────────────
     def _manage_categories(self):
-        win = self.dashboard_window
-        if not win:
-            return
+        threading.Thread(target=self._manage_categories_dialog, daemon=True).start()
 
-        dlg = tk.Toplevel(win)
+    def _manage_categories_dialog(self):
+        dlg = tk.Tk()
         dlg.title("Gerenciar Categorias")
         dlg.configure(bg=t("BG"))
         dlg.geometry("400x480")
         dlg.resizable(False, False)
         dlg.attributes("-topmost", True)
-        dlg.grab_set()
         set_window_icon(dlg)
         dlg.after(50, lambda: style_titlebar(dlg))
 
@@ -2717,6 +2747,9 @@ class Missionfy:
                             bg=t("ACCENT"), fg=t("BG"), padx=20, pady=6, cursor="hand2")
         save_btn.bind("<Button-1>", lambda e: save_all())
         save_btn.pack(side="left", padx=5)
+
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        dlg.mainloop()
 
     # ── Settings (inline in dashboard) ───────────────────────────────────────
     def _draw_settings(self, parent):
@@ -3358,26 +3391,34 @@ def show_welcome_wizard():
             end_entry = tk.Entry(custom_row, font=(FONT, 12), bg=INPUT_W, fg=FG_W,
                                  insertbackground=FG_W, relief="flat", width=14, justify="center",
                                  highlightbackground=BORDER_W, highlightthickness=1)
-            end_entry.insert(0, data["end_date"])
+            try:
+                ed_init = date.fromisoformat(data["end_date"]).strftime("%d/%m/%Y")
+            except (ValueError, TypeError):
+                ed_init = data["end_date"]
+            end_entry.insert(0, ed_init)
             end_entry.pack(side="left", ipady=4)
-            tk.Label(custom_row, text="(ANO-MÊS-DIA)", font=(FONT, 9),
+            tk.Label(custom_row, text="(dd/mm/aaaa)", font=(FONT, 9),
                      bg=CARD_W, fg=DIM_W).pack(side="left", padx=(8, 0))
 
             def apply_custom(e=None):
                 val = end_entry.get().strip()
                 try:
-                    d = date.fromisoformat(val)
+                    # Aceitar dd/mm/aaaa ou aaaa-mm-dd
+                    try:
+                        d = datetime.strptime(val, "%d/%m/%Y").date()
+                    except ValueError:
+                        d = date.fromisoformat(val)
                     if d <= hoje:
                         error.configure(text="A data deve ser no futuro!")
                         return
-                    selected_end.set(val)
+                    selected_end.set(d.isoformat())
                     dias_diff = (d - hoje).days
                     end_display.configure(text=f"{d.strftime('%d/%m/%Y')}  ({dias_diff} dias)")
                     for w in shortcuts.winfo_children():
                         w.configure(bg=BORDER_W, fg=DIM_W)
                     error.configure(text="")
                 except ValueError:
-                    error.configure(text="Formato inválido. Use ANO-MÊS-DIA")
+                    error.configure(text="Formato invalido. Use dd/mm/aaaa")
 
             end_entry.bind("<Return>", apply_custom)
             end_entry.bind("<FocusOut>", apply_custom)
