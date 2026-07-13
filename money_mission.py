@@ -89,6 +89,8 @@ def load_data():
     data.setdefault("categories", DEFAULT_CATEGORIES)
     data.setdefault("settings", {"theme": "dark"})
     data.setdefault("goal_assignments", {})
+    data.setdefault("fixed_shortcuts", [])
+    data.setdefault("category_rules", {})
     return data
 
 
@@ -409,6 +411,36 @@ class Missionfy:
             self.icon.icon = create_icon_image(self._main_progress())
             self.icon.title = f"Missionfy — {pct_label(self._main_total(), self._main_goal())}"
             self.icon.menu = self._build_menu()
+
+    # ── Shortcuts ──────────────────────────────────────────────────────────────
+    def _get_shortcuts(self):
+        """Return up to 4 shortcuts: pinned + auto-detected from most frequent entries."""
+        fixed = self.data.get("fixed_shortcuts", [])
+        if len(fixed) >= 4:
+            return fixed[:4]
+
+        # Auto: analyze last 30 positive entries
+        entries = [e for e in self.data["entries"] if e["amount"] > 0][-30:]
+        freq = {}
+        for e in entries:
+            key = f"{e.get('description', '')}_{e['amount']}"
+            if key not in freq:
+                freq[key] = {"count": 0, "amount": e["amount"],
+                             "description": e.get("description", ""),
+                             "category": e.get("category", "Outro")}
+            freq[key]["count"] += 1
+
+        auto = sorted(freq.values(), key=lambda x: -x["count"])
+        auto = [s for s in auto if s["count"] >= 2]  # minimum 2 occurrences
+
+        # Combine pinned + auto, no duplicates
+        fixed_descs = {s["description"] for s in fixed}
+        combined = list(fixed)
+        for s in auto:
+            if s["description"] not in fixed_descs and len(combined) < 4:
+                combined.append(s)
+
+        return combined[:4]
 
     # ── Custom popup menu ─────────────────────────────────────────────────────
     def _show_tray_popup(self, icon, item=None):
