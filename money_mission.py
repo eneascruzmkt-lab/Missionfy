@@ -98,6 +98,8 @@ def load_data():
     data.setdefault("fixed_shortcuts", [])
     data.setdefault("category_rules", {})
     data.setdefault("reflections", [])
+    data["settings"].setdefault("pomodoro_focus", 25)
+    data["settings"].setdefault("pomodoro_break", 5)
     return data
 
 
@@ -444,6 +446,11 @@ class Missionfy:
         self.icon = None
         self.dashboard_window = None
         self._apply_theme(self.data.get("settings", {}).get("theme", "dark"))
+        self._pomo_phase = "idle"      # "idle", "focus", "break"
+        self._pomo_remaining = 0        # seconds remaining
+        self._pomo_count = 0            # completed cycles this session
+        self._pomo_running = False      # True if timer is counting
+        self._pomo_thread = None
 
     def _apply_theme(self, name):
         global T
@@ -473,6 +480,10 @@ class Missionfy:
         if self.icon:
             self.icon.icon = create_icon_image(self._main_progress())
             self.icon.title = f"Missionfy — {pct_label(self._main_total(), self._main_goal())}"
+            if self._pomo_phase == "focus":
+                self.icon.title = f"Missionfy — Foco {self._pomo_format_time()}"
+            elif self._pomo_phase == "break":
+                self.icon.title = f"Missionfy — Pausa {self._pomo_format_time()}"
             self.icon.menu = self._build_menu()
 
     # ── Shortcuts ──────────────────────────────────────────────────────────────
@@ -530,6 +541,93 @@ class Missionfy:
             if unlocked:
                 earned.append((icon, name))
         return earned
+
+    # ── Pomodoro Timer ─────────────────────────────────────────────────────────
+    def _pomo_start(self):
+        """Start or resume the pomodoro timer."""
+        if self._pomo_phase == "idle":
+            self._pomo_phase = "focus"
+            focus_min = self.data.get("settings", {}).get("pomodoro_focus", 25)
+            self._pomo_remaining = focus_min * 60
+        self._pomo_running = True
+        if not self._pomo_thread or not self._pomo_thread.is_alive():
+            self._pomo_thread = threading.Thread(target=self._pomo_loop, daemon=True)
+            self._pomo_thread.start()
+
+    def _pomo_pause(self):
+        """Pause the timer."""
+        self._pomo_running = False
+
+    def _pomo_skip(self):
+        """Skip to next phase."""
+        if self._pomo_phase == "focus":
+            self._pomo_count += 1
+            self._pomo_phase = "break"
+            break_min = self.data.get("settings", {}).get("pomodoro_break", 5)
+            self._pomo_remaining = break_min * 60
+        elif self._pomo_phase == "break":
+            self._pomo_phase = "focus"
+            focus_min = self.data.get("settings", {}).get("pomodoro_focus", 25)
+            self._pomo_remaining = focus_min * 60
+        self._pomo_running = True
+        if not self._pomo_thread or not self._pomo_thread.is_alive():
+            self._pomo_thread = threading.Thread(target=self._pomo_loop, daemon=True)
+            self._pomo_thread.start()
+
+    def _pomo_stop(self):
+        """Stop and reset timer."""
+        self._pomo_phase = "idle"
+        self._pomo_remaining = 0
+        self._pomo_running = False
+        self._pomo_count = 0
+
+    def _pomo_loop(self):
+        """Background timer loop - ticks every second."""
+        import time
+        while self._pomo_running and self._pomo_remaining > 0:
+            time.sleep(1)
+            if self._pomo_running:
+                self._pomo_remaining -= 1
+                # Update tray icon tooltip
+                try:
+                    if self.icon:
+                        if self._pomo_phase == "focus":
+                            self.icon.title = f"Missionfy — Foco {self._pomo_format_time()}"
+                        elif self._pomo_phase == "break":
+                            self.icon.title = f"Missionfy — Pausa {self._pomo_format_time()}"
+                except Exception:
+                    pass
+                if self._pomo_remaining <= 0:
+                    self._pomo_phase_complete()
+
+    def _pomo_phase_complete(self):
+        """Called when a phase ends."""
+        if self._pomo_phase == "focus":
+            self._pomo_count += 1
+            self._pomo_phase = "break"
+            break_min = self.data.get("settings", {}).get("pomodoro_break", 5)
+            self._pomo_remaining = break_min * 60
+            self._pomo_running = True
+            # Open popup to show break
+            self._show_tray_popup(None, None)
+            # Continue timer
+            self._pomo_thread = threading.Thread(target=self._pomo_loop, daemon=True)
+            self._pomo_thread.start()
+        elif self._pomo_phase == "break":
+            self._pomo_phase = "focus"
+            focus_min = self.data.get("settings", {}).get("pomodoro_focus", 25)
+            self._pomo_remaining = focus_min * 60
+            self._pomo_running = True
+            # Open popup to show focus
+            self._show_tray_popup(None, None)
+            # Continue timer
+            self._pomo_thread = threading.Thread(target=self._pomo_loop, daemon=True)
+            self._pomo_thread.start()
+
+    def _pomo_format_time(self):
+        """Format remaining seconds as MM:SS."""
+        m, s = divmod(max(self._pomo_remaining, 0), 60)
+        return f"{m:02d}:{s:02d}"
 
     # ── Custom popup menu ─────────────────────────────────────────────────────
     def _show_tray_popup(self, icon, item=None):
@@ -617,6 +715,90 @@ class Missionfy:
         bar_color = t("ACCENT") if progress >= 0.75 else (t("YELLOW") if progress >= 0.4 else t("RED"))
         if progress > 0:
             tk.Frame(bar_f, bg=bar_color, height=6).place(relx=0, rely=0, relwidth=min(progress, 1.0), relheight=1.0)
+
+        # ── Pomodoro Timer ──
+        tk.Frame(inner, bg=t("BORDER"), height=1).pack(fill="x", padx=12, pady=6)
+
+        pomo_frame = tk.Frame(inner, bg=t("BG"), padx=16, pady=4)
+        pomo_frame.pack(fill="x")
+
+        # Phase indicator + timer
+        phase_text = "Foco" if self._pomo_phase == "focus" else ("Pausa" if self._pomo_phase == "break" else "Pomodoro")
+        phase_color = t("ACCENT") if self._pomo_phase == "focus" else (t("YELLOW") if self._pomo_phase == "break" else t("DIMMED"))
+
+        pomo_top = tk.Frame(pomo_frame, bg=t("BG"))
+        pomo_top.pack(fill="x")
+        tk.Label(pomo_top, text=phase_text, font=(FONT, 10, "bold"),
+                 bg=t("BG"), fg=phase_color).pack(side="left")
+        if self._pomo_phase != "idle":
+            tk.Label(pomo_top, text=f"#{self._pomo_count + 1}", font=(FONT, 9),
+                     bg=t("BG"), fg=t("DIMMED")).pack(side="right")
+
+        # Timer display
+        if self._pomo_phase == "idle":
+            focus_min = self.data.get("settings", {}).get("pomodoro_focus", 25)
+            time_text = f"{focus_min:02d}:00"
+        else:
+            time_text = self._pomo_format_time()
+
+        tk.Label(pomo_frame, text=time_text, font=(FONT, 24, "bold"),
+                 bg=t("BG"), fg=t("FG")).pack(pady=(4, 6))
+
+        # Buttons
+        pomo_btns = tk.Frame(pomo_frame, bg=t("BG"))
+        pomo_btns.pack(fill="x")
+
+        if self._pomo_phase == "idle":
+            # Not started - show Start button
+            start_btn = tk.Label(pomo_btns, text="Iniciar", font=(FONT, 11, "bold"),
+                                 bg=t("ACCENT"), fg="#12121a", pady=6, cursor="hand2")
+            start_btn.pack(fill="x")
+            def do_start(e=None):
+                self._pomo_start()
+                popup.destroy()
+            start_btn.bind("<Button-1>", do_start)
+        elif self._pomo_running:
+            # Running - show Pause + Skip
+            pause_btn = tk.Label(pomo_btns, text="Pausar", font=(FONT, 10),
+                                 bg=t("BG_HOVER"), fg=t("FG"), pady=6, cursor="hand2")
+            pause_btn.pack(side="left", fill="x", expand=True, padx=(0, 3))
+            def do_pause(e=None):
+                self._pomo_pause()
+                popup.destroy()
+            pause_btn.bind("<Button-1>", do_pause)
+
+            skip_btn = tk.Label(pomo_btns, text="Pular", font=(FONT, 10),
+                                bg=t("BG_HOVER"), fg=t("DIMMED"), pady=6, cursor="hand2")
+            skip_btn.pack(side="left", fill="x", expand=True, padx=(3, 0))
+            def do_skip(e=None):
+                self._pomo_skip()
+                popup.destroy()
+            skip_btn.bind("<Button-1>", do_skip)
+        else:
+            # Paused - show Continue + Skip + Stop
+            cont_btn = tk.Label(pomo_btns, text="Continuar", font=(FONT, 10, "bold"),
+                                bg=t("ACCENT"), fg="#12121a", pady=6, cursor="hand2")
+            cont_btn.pack(side="left", fill="x", expand=True, padx=(0, 3))
+            def do_continue(e=None):
+                self._pomo_start()
+                popup.destroy()
+            cont_btn.bind("<Button-1>", do_continue)
+
+            skip_btn = tk.Label(pomo_btns, text="Pular", font=(FONT, 10),
+                                bg=t("BG_HOVER"), fg=t("DIMMED"), pady=6, cursor="hand2")
+            skip_btn.pack(side="left", fill="x", expand=True, padx=(3, 3))
+            def do_skip(e=None):
+                self._pomo_skip()
+                popup.destroy()
+            skip_btn.bind("<Button-1>", do_skip)
+
+            stop_btn = tk.Label(pomo_btns, text="Parar", font=(FONT, 10),
+                                bg=t("RED_DIM"), fg=t("RED"), pady=6, cursor="hand2")
+            stop_btn.pack(side="left", fill="x", expand=True, padx=(3, 0))
+            def do_stop(e=None):
+                self._pomo_stop()
+                popup.destroy()
+            stop_btn.bind("<Button-1>", do_stop)
 
         # ── 2. Quick register section ────────────────────────────────────
         tk.Frame(inner, bg=t("BORDER"), height=1).pack(fill="x", padx=12, pady=6)
@@ -2818,6 +3000,37 @@ class Missionfy:
                                 highlightthickness=0)
             cb.pack(anchor="w", pady=1)
 
+        # Pomodoro
+        tk.Label(parent, text="POMODORO", font=(FONT, 10, "bold"),
+                 bg=t("BG"), fg=t("DIMMED")).pack(anchor="w", padx=24, pady=(16, 6))
+
+        pomo_card = tk.Frame(parent, bg=t("BG_CARD"), highlightbackground=t("BORDER"), highlightthickness=1)
+        pomo_card.pack(fill="x", padx=24)
+        pomo_inner = tk.Frame(pomo_card, bg=t("BG_CARD"), padx=16, pady=12)
+        pomo_inner.pack(fill="x")
+
+        # Focus time
+        focus_row = tk.Frame(pomo_inner, bg=t("BG_CARD"))
+        focus_row.pack(fill="x", pady=(0, 8))
+        tk.Label(focus_row, text="Tempo de foco (min)", font=(FONT, 10),
+                 bg=t("BG_CARD"), fg=t("FG")).pack(side="left")
+        pomo_focus_entry = tk.Entry(focus_row, font=(FONT, 11), bg=t("BG_INPUT"), fg=t("FG"),
+                                    insertbackground=t("FG"), relief="flat", width=5,
+                                    highlightbackground=t("BORDER"), highlightthickness=1)
+        pomo_focus_entry.insert(0, str(self.data.get("settings", {}).get("pomodoro_focus", 25)))
+        pomo_focus_entry.pack(side="right", ipady=3)
+
+        # Break time
+        break_row = tk.Frame(pomo_inner, bg=t("BG_CARD"))
+        break_row.pack(fill="x")
+        tk.Label(break_row, text="Tempo de pausa (min)", font=(FONT, 10),
+                 bg=t("BG_CARD"), fg=t("FG")).pack(side="left")
+        pomo_break_entry = tk.Entry(break_row, font=(FONT, 11), bg=t("BG_INPUT"), fg=t("FG"),
+                                    insertbackground=t("FG"), relief="flat", width=5,
+                                    highlightbackground=t("BORDER"), highlightthickness=1)
+        pomo_break_entry.insert(0, str(self.data.get("settings", {}).get("pomodoro_break", 5)))
+        pomo_break_entry.pack(side="right", ipady=3)
+
         # Salvar
         success_label = tk.Label(inner, text="", font=(FONT, 10), bg=t("BG_CARD"), fg=t("ACCENT"))
         success_label.pack(pady=(8, 0))
@@ -2830,6 +3043,16 @@ class Missionfy:
                 "notify_daily_progress": notify_daily_progress.get(),
                 "notify_milestones": notify_milestones.get(),
             })
+            # Save pomodoro settings
+            try:
+                pf = int(pomo_focus_entry.get().strip())
+                pb = int(pomo_break_entry.get().strip())
+                if pf > 0:
+                    self.data["settings"]["pomodoro_focus"] = pf
+                if pb > 0:
+                    self.data["settings"]["pomodoro_break"] = pb
+            except (ValueError, NameError):
+                pass
             save_data(self.data)
             success_label.configure(text="✓ Configurações salvas!")
             success_label.after(3000, lambda: success_label.configure(text=""))
